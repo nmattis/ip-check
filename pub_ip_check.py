@@ -35,10 +35,11 @@ def main():
                     dns_update = requests.post(
                         GOOGLE_DYNAMIC_DNS_UPDATE.format(USER_NAME, PASSWORD, DOMAIN, ip_address)
                     )
-                    if dns_update.status_code == requests.codes.ok:
+                    dns_update_result = dns_update.text
+                    if dns_update_result.find('good') != 0:
                         logging.info('Google DNS update was successful.')
                     else:
-                        logging.error(f'Google DNS update was unsuccessful {dns_update.status_code} : {dns_update.text}')
+                        logging.error(f'Google DNS update was unsuccessful or updated in error {dns_update.text}')
                 else:
                     logging.info('IP has not changed.')
             except FileNotFoundError:
@@ -51,7 +52,8 @@ def main():
                 dns_update = requests.post(
                     GOOGLE_DYNAMIC_DNS_UPDATE.format(USER_NAME, PASSWORD, DOMAIN, ip_address)
                 )
-                if dns_update.status_code == requests.codes.ok:
+                dns_update_result = dns_update.text
+                if dns_update_result.find('good') != 0:
                     logging.info('Google DNS update was successful.')
                 else:
                     logging.error(f'Google DNS update was unsuccessful {dns_update.status_code} : {dns_update.text}')
