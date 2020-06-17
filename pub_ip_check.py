@@ -1,26 +1,14 @@
 import logging
-import re
-import smtplib
+import json
 
 import requests
-from bs4 import BeautifulSoup
 
-SEARCH_URL = 'https://www.google.com/search?q=what%27s+my+ip'
-IP_REGEX = "^(?:[0-9]{1,3}.){3}[0-9]{1,3}$"
+IPIFY_PUB_IP_URL = 'https://api6.ipify.org?format=json'
+GOOGLE_DYNAMIC_DNS_UPDATE = 'https://{}:{}@domains.google.com/nic/update?hostname={}&myip={}'
 FILE_NAME = 'ip.txt'
-OUTGOING = 'smtp.gmail.com'
-PORT = 465 
-USER_NAME = '<gmail user>'
-PASSWORD = '<gmail password>'
-EMAIL_RECIPIENT = '<email recipient>'
-EMAIL_MESSAGE = "Subject: New Home Public IP\nIP Address is {!s}"
-
-
-def send_email(ip_address):
-    server = smtplib.SMTP_SSL(OUTGOING, PORT)
-    server.login(USER_NAME, PASSWORD)
-    server.sendmail(USER_NAME, EMAIL_RECIPIENT, EMAIL_MESSAGE.format(ip_address))
-    server.quit()
+DOMAIN = '<DOMAIN_NAME>'
+USER_NAME = '<DDNS_USER>'
+PASSWORD = '<DDNS_PASSWORD>'
 
 
 def main():
@@ -31,36 +19,42 @@ def main():
         datefmt='%m/%d/%Y %I:%M:%S %p'
     )
     try:
-        search_result = requests.get(SEARCH_URL)
-        if search_result.status_code == requests.codes.ok:
-            html = BeautifulSoup(search_result.content, 'html.parser')
-            ip_check = re.compile(IP_REGEX)
-            for div in html.body.find('div', {'id': 'search'}):
-                children = div.findChildren('div', recursive=True)
-                for child in children:
-                    if ip_check.fullmatch(child.text):
-                        try:
-                            with open(FILE_NAME, 'r') as file:
-                                last_ip = file.readlines()
-                            if not last_ip[0].strip() == child.text.strip():
-                                # write out new ip, send update email
-                                last_ip[0] = child.text.strip()
-                                with open(FILE_NAME, 'w') as file:
-                                    file.writelines(child.text.strip())
+        pub_ip_address = requests.get(IPIFY_PUB_IP_URL)
+        if pub_ip_address.status_code == requests.codes.ok:
+            ip_address = json.loads(pub_ip_address.text)['ip']
+            try:
+                with open(FILE_NAME, 'r') as file:
+                    last_ip = file.readlines()
+                if not last_ip[0].strip() == ip_address:
+                    # write out new ip, update dns record
+                    with open(FILE_NAME, 'w') as file:
+                        file.writelines(ip_address)
 
-                                send_email(child.text.strip())
-                                logging.info(f'New IP is {child.text.strip()}')
-                            else:
-                                logging.info('IP has not changed.')
-                        except FileNotFoundError:
-                            # no last ip, must be first run, write to file, send email
-                            file = open(FILE_NAME, 'w+')
-                            file.write(child.text.strip())
+                    logging.info(f'New IP is {ip_address}')
 
-                            send_email(child.text.strip())
-                            logging.info(f'New IP is {child.text.strip()}')
-                        finally:
-                            file.close()
+                    dns_update = requests.post(
+                        GOOGLE_DYNAMIC_DNS_UPDATE.format(USER_NAME, PASSWORD, DOMAIN, ip_address)
+                    )
+                    if dns_update.status_code == requests.codes.ok:
+                        logging.info('Google DNS update was successful.')
+                    else:
+                        logging.error(f'Google DNS update was unsuccessful {dns_update.status_code} : {dns_update.text}')
+                else:
+                    logging.info('IP has not changed.')
+            except FileNotFoundError:
+                # no last ip, must be first run, write to file, update dns record
+                with open(FILE_NAME, 'w+') as file:
+                    file.write(ip_address)
+
+                logging.info(f'New IP is {ip_address}')
+
+                dns_update = requests.post(
+                    GOOGLE_DYNAMIC_DNS_UPDATE.format(USER_NAME, PASSWORD, DOMAIN, ip_address)
+                )
+                if dns_update.status_code == requests.codes.ok:
+                    logging.info('Google DNS update was successful.')
+                else:
+                    logging.error(f'Google DNS update was unsuccessful {dns_update.status_code} : {dns_update.text}')
         else:
             logging.info(f'Request responded with {search_result.status_code} status code')
     except requests.exceptions.RequestException as e:
